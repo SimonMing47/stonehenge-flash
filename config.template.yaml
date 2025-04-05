@@ -1,0 +1,24 @@
+# MEV Bot日志配置
+logging:
+  output_path: flash.log   # 日志文件路径
+  max_size: 100            # 单个日志文件大小上限，单位MB
+  max_backups: 10          # 保留的旧日志文件数量
+  max_age: 30              # 保留日志文件的最大天数
+  compress: true           # 是否压缩旧日志文件
+  local_time: true         # 使用本地时间戳（而非UTC）
+
+# 其他YAML配置可以在这里添加
+ave:
+  token: ""
+
+# wechat
+wechat:
+  verify_token: ""  # 微信连接校验token
+
+# solscan
+solscan:
+  sol_auth: ""  # Solscan的身份验证信息
+  token: ""
+  cookie: ""
+  origin: "https://solscan.io"  # Solscan的API地址
+  referer: "https://solscan.io/"  # Solscan的Referer头

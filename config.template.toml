@@ -1,0 +1,60 @@
+
+[bot]
+compute_unit_limit = 680000
+merge_mints = false
+
+[jito]
+block_engine_urls = [
+  "https://ny.mainnet.block-engine.jito.wtf/api/v1",
+  "https://tokyo.mainnet.block-engine.jito.wtf/api/v1",
+  "https://slc.mainnet.block-engine.jito.wtf/api/v1",
+  "https://amsterdam.mainnet.block-engine.jito.wtf/api/v1",
+  "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1",
+]
+enabled = true
+ip_addresses = []
+uuid = ""
+
+[jito.tip_config]
+count = 3
+from = 10000
+strategy = "Random"
+to = 100000
+
+[kamino_flashloan]
+enabled = true
+
+[routing]
+
+[[routing.mint_config_list]]
+lookup_table_accounts = [
+]
+meteora_dlmm_pool_list = ["LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"]
+mint = "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"
+process_delay = 1000
+pump_pool_list = [
+  "AmmpSnW5xVeKHTAU9fMjyKEMPgrzmUj3ah5vgvHhAB5J",
+  "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+]
+raydium_cp_pool_list = ["CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"]
+raydium_pool_list = ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"]
+
+[rpc]
+url = ""
+
+[spam]
+enable_simple_send = false
+enabled = true
+max_retries = 10
+sending_rpc_urls = [
+  "",
+]
+
+[spam.compute_unit_price]
+count = 1
+from = 100
+strategy = "Random"
+to = 100
+
+[wallet]
+private=""
