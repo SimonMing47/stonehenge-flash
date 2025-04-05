@@ -14,10 +14,15 @@ import (
 
 // FlashAgentConfig 表示整个代理配置
 type FlashAgentConfig struct {
-	Logging LogConfig     `yaml:"logging"` // 日志配置
-	Ave     AveConfig     `yaml:"ave"`     // Ave服务配置
-	Wechat  WechatConfig  `yaml:"wechat"`  // 微信配置
-	SolScan SolScanConfig `yaml:"solscan"` // Solscan配置
+	Logging        LogConfig      `yaml:"logging"`  // 日志配置
+	Ave            AveConfig      `yaml:"ave"`      // Ave服务配置
+	Wechat         WechatConfig   `yaml:"wechat"`   // 微信配置
+	SolScan        SolScanConfig  `yaml:"solscan"`  // Solscan配置
+	HotTokenConfig HotTokenConfig `yaml:"hottoken"` // 热点Token配置
+}
+
+type HotTokenConfig struct {
+	Interval int `yaml:"interval"` // 热点Token
 }
 
 // LogConfig 表示日志配置

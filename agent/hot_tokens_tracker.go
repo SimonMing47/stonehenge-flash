@@ -13,14 +13,16 @@ import (
 
 // HotToken 存储热门代币信息
 type HotToken struct {
-	Pair         string  `json:"pair"`
-	Chain        string  `json:"chain"`
-	Amm          string  `json:"amm"`
-	TargetToken  string  `json:"target_token"`
-	TokenSymbol  string  `json:"token0_symbol"`
-	Volume15m    float64 `json:"volume_u_15m"` // 15分钟交易量
-	VolumeUSD24h float64 `json:"volume_u_24h"`
-	FlashAgent   Agent
+	Pair            string  `json:"pair"`
+	Chain           string  `json:"chain"`
+	Amm             string  `json:"amm"`
+	TargetToken     string  `json:"target_token"`
+	TokenSymbol     string  `json:"token0_symbol"`
+	Volume15m       float64 `json:"volume_u_15m"` // 15分钟交易量
+	VolumeUSD24h    float64 `json:"volume_u_24h"`
+	BuyVolumeUSD15m float64 `json:"buy_volume_u_15m"`
+	BuyVolumeUSD5m  float64 `json:"buy_volume_u_5m"`
+	FlashAgent      Agent
 }
 
 // APIResponse API响应结构
@@ -59,13 +61,15 @@ type SolscanPoolResponse struct {
 
 // TokenPoolsInfo 存储代币的池信息
 type TokenPoolsInfo struct {
-	TokenAddress   string
-	TokenSymbol    string
-	Volume15m      float64
-	PumpPools      []string
-	MeteoraLists   []string
-	RaydiumPools   []string
-	RaydiumCPPools []string
+	TokenAddress    string
+	TokenSymbol     string
+	Volume15m       float64
+	BuyVolumeUSD15m float64
+	BuyVolumeUSD5m  float64
+	PumpPools       []string
+	MeteoraLists    []string
+	RaydiumPools    []string
+	RaydiumCPPools  []string
 }
 
 // HotTokensTracker 热门代币跟踪器
@@ -83,7 +87,7 @@ type HotTokensTracker struct {
 func NewHotTokensTracker(mevConfig *Config, agentConfig *FlashAgentConfig, agent *Agent) *HotTokensTracker {
 	return &HotTokensTracker{
 		APIURL:       "https://febweb002.com/v1api/v4/tokens/treasure/list",
-		PollInterval: 45 * time.Minute,
+		PollInterval: time.Duration(agentConfig.HotTokenConfig.Interval) * time.Minute,
 		HotTokens:    []HotToken{},
 		MevConfig:    mevConfig,
 		AgentConfig:  agentConfig,
@@ -91,10 +95,10 @@ func NewHotTokensTracker(mevConfig *Config, agentConfig *FlashAgentConfig, agent
 	}
 }
 
-// FetchHotTokens 获取30分钟内交易量最大的热门代币
+// FetchHotTokens 获取15分钟内交易量最大的热门代币
 func (h *HotTokensTracker) FetchHotTokens() error {
 	// 构建请求URL和参数 - 获取更多数据然后按15分钟交易量排序
-	url := fmt.Sprintf("%s?chain=solana&pageNO=1&pageSize=40&category=hot&refresh_total=0", h.APIURL)
+	url := fmt.Sprintf("%s?chain=solana&pageNO=1&pageSize=50&category=hot&refresh_total=0", h.APIURL)
 
 	// 创建请求
 	req, err := http.NewRequest("GET", url, nil)
@@ -141,10 +145,10 @@ func (h *HotTokensTracker) FetchHotTokens() error {
 		return fmt.Errorf("API响应格式无效")
 	}
 
-	// 根据30分钟交易量排序
+	// 根据15分钟购买量排序
 	tokens := apiResp.Data.Data
 	sort.Slice(tokens, func(i, j int) bool {
-		return tokens[i].Volume15m > tokens[j].Volume15m
+		return tokens[i].BuyVolumeUSD15m > tokens[j].BuyVolumeUSD15m
 	})
 
 	// 仅保留前10个代币
@@ -159,13 +163,15 @@ func (h *HotTokensTracker) FetchHotTokens() error {
 	// 为每个热门代币创建初始池信息结构
 	for _, token := range h.HotTokens {
 		info := TokenPoolsInfo{
-			TokenAddress:   token.TargetToken,
-			TokenSymbol:    token.TokenSymbol,
-			Volume15m:      token.Volume15m,
-			PumpPools:      []string{},
-			MeteoraLists:   []string{},
-			RaydiumPools:   []string{},
-			RaydiumCPPools: []string{},
+			TokenAddress:    token.TargetToken,
+			TokenSymbol:     token.TokenSymbol,
+			Volume15m:       token.Volume15m,
+			BuyVolumeUSD15m: token.BuyVolumeUSD15m,
+			BuyVolumeUSD5m:  token.BuyVolumeUSD5m,
+			PumpPools:       []string{},
+			MeteoraLists:    []string{},
+			RaydiumPools:    []string{},
+			RaydiumCPPools:  []string{},
 		}
 		h.TokenPoolsInfos = append(h.TokenPoolsInfos, info)
 		log.Printf("检测到15分钟内交易量大的代币: %s (%s), 15分钟交易量: $%.2f",
@@ -239,25 +245,67 @@ func (h *HotTokensTracker) FetchPoolsForToken(tokenInfo *TokenPoolsInfo, tokenAd
 	log.Printf("代币 %s (%s) 的池信息: %d个", tokenInfo.TokenSymbol, tokenInfo.TokenAddress, len(poolResp.Data))
 	log.Printf("池信息: %+v", poolResp.Data)
 
+	// 添加池子计数器
+	addedPoolCount := 0
+	maxPoolsPerToken := 2 // 每个代币最多添加2个池子
+
 	// 遍历data中的实际池，确保只处理与当前代币相关的池
 	for _, pool := range poolResp.Data {
-		poolID := pool.PoolID
-		programID := pool.ProgramID
+		// 检查是否已达到最大池子数量
+		if addedPoolCount >= maxPoolsPerToken {
+			log.Printf("代币 %s (%s) 已达到最大池子数量 (%d)，跳过剩余池子",
+				tokenInfo.TokenSymbol, tokenInfo.TokenAddress, maxPoolsPerToken)
+			break // 停止添加更多池子
+		}
 
-		// 获取池ID对应的账户信息
-		poolAccount, hasPoolAccount := poolResp.Metadata.Accounts[poolID]
+		// 验证: 确认池子包含我们的目标代币
+		containsToken := false
+		containsSOL := false // 新增: 检查是否包含SOL
+		for _, tokInfo := range pool.TokensInfo {
+			if strings.EqualFold(tokInfo.Token, tokenAddress) {
+				containsToken = true
+			}
+			if strings.EqualFold(tokInfo.Token, "So11111111111111111111111111111111111111112") {
+				containsSOL = true
+			}
+		}
+
+		if !containsToken {
+			log.Printf("跳过池子 %s: 不包含目标代币 %s", pool.PoolID, tokenAddress)
+			continue // 跳过此池子
+		}
+
+		// 必须包含SOL才能继续
+		if !containsSOL {
+			log.Printf("跳过池子 %s: 不包含SOL交易对", pool.PoolID)
+			continue
+		}
+
+		// 现在我们确信这个池子包含我们的目标代币，继续处理
+		poolAccount, hasPoolAccount := poolResp.Metadata.Accounts[pool.PoolID]
 		if hasPoolAccount {
 			// 检查是否为Pump池
 			if strings.Contains(strings.ToLower(poolAccount.AccountLabel), "pump") &&
 				!strings.Contains(strings.ToLower(poolAccount.AccountLabel), "bonding curve") {
-				tokenInfo.PumpPools = append(tokenInfo.PumpPools, poolID)
-				log.Printf("添加Pump池: %s, 标签: %v, 账户标签: %s",
-					poolID, poolAccount.AccountTags, poolAccount.AccountLabel)
+				// 检查是否已经添加过
+				alreadyAdded := false
+				for _, existingPool := range tokenInfo.PumpPools {
+					if existingPool == pool.PoolID {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					tokenInfo.PumpPools = append(tokenInfo.PumpPools, pool.PoolID)
+					log.Printf("添加Pump池: %s, 标签: %v, 账户标签: %s",
+						pool.PoolID, poolAccount.AccountTags, poolAccount.AccountLabel)
+					addedPoolCount++ // 增加计数器
+				}
 			}
 		}
 
 		// 获取程序ID对应的账户信息
-		progAccount, hasProgAccount := poolResp.Metadata.Accounts[programID]
+		progAccount, hasProgAccount := poolResp.Metadata.Accounts[pool.ProgramID]
 		if hasProgAccount {
 			// 检查Raydium程序
 			if strings.Contains(strings.ToLower(progAccount.AccountLabel), "raydium") &&
@@ -266,12 +314,12 @@ func (h *HotTokensTracker) FetchPoolsForToken(tokenInfo *TokenPoolsInfo, tokenAd
 				if strings.Contains(strings.ToLower(progAccount.AccountLabel), "concentrated") ||
 					strings.Contains(strings.ToLower(progAccount.AccountLabel), "clmm") {
 					// 这是 Raydium CP 池
-					tokenInfo.RaydiumCPPools = append(tokenInfo.RaydiumCPPools, poolID)
-					log.Printf("添加 Raydium CP 池: %s", poolID)
+					tokenInfo.RaydiumCPPools = append(tokenInfo.RaydiumCPPools, pool.PoolID)
+					log.Printf("添加 Raydium CP 池: %s", pool.PoolID)
 				} else {
 					// 这是普通 Raydium 池
-					tokenInfo.RaydiumPools = append(tokenInfo.RaydiumPools, poolID)
-					log.Printf("添加 Raydium 普通池: %s", poolID)
+					tokenInfo.RaydiumPools = append(tokenInfo.RaydiumPools, pool.PoolID)
+					log.Printf("添加 Raydium 普通池: %s", pool.PoolID)
 				}
 			}
 
@@ -280,8 +328,8 @@ func (h *HotTokensTracker) FetchPoolsForToken(tokenInfo *TokenPoolsInfo, tokenAd
 				progAccount.AccountType == "program" {
 				// 检查是否为 Meteora DLMM 池
 				if strings.Contains(strings.ToLower(progAccount.AccountLabel), "dlmm") {
-					tokenInfo.MeteoraLists = append(tokenInfo.MeteoraLists, poolID)
-					log.Printf("添加 Meteora DLMM 池: %s, 标签: %s", poolID, progAccount.AccountLabel)
+					tokenInfo.MeteoraLists = append(tokenInfo.MeteoraLists, pool.PoolID)
+					log.Printf("添加 Meteora DLMM 池: %s, 标签: %s", pool.PoolID, progAccount.AccountLabel)
 				}
 			}
 		}
@@ -303,7 +351,7 @@ func (h *HotTokensTracker) UpdateConfig() {
 
 	// 根据交易量排序
 	sort.Slice(h.TokenPoolsInfos, func(i, j int) bool {
-		return h.TokenPoolsInfos[i].Volume15m > h.TokenPoolsInfos[j].Volume15m
+		return h.TokenPoolsInfos[i].BuyVolumeUSD15m > h.TokenPoolsInfos[j].BuyVolumeUSD15m
 	})
 
 	// 只保留交易量最大且有至少两种类型池子的代币
@@ -377,6 +425,21 @@ func (h *HotTokensTracker) UpdateConfig() {
 				LookupTableAccounts: []string{},
 				ProcessDelay:        1000,
 			}
+		}
+
+		// 截断池子列表，确保不超过最大数量
+		maxPools := 2
+		if len(info.PumpPools) > maxPools {
+			info.PumpPools = info.PumpPools[:maxPools]
+		}
+		if len(info.MeteoraLists) > maxPools {
+			info.MeteoraLists = info.MeteoraLists[:maxPools]
+		}
+		if len(info.RaydiumPools) > maxPools {
+			info.RaydiumPools = info.RaydiumPools[:maxPools]
+		}
+		if len(info.RaydiumCPPools) > maxPools {
+			info.RaydiumCPPools = info.RaydiumCPPools[:maxPools]
 		}
 
 		// 更新池列表
